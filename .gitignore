@@ -1,3 +1,4 @@
 sandbox
 tests/segv
 tests/memhog
+rootfs/
