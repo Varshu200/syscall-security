@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <errno.h>
+#include <grp.h>
 #include <limits.h>
 #include <sched.h>
 #include <seccomp.h>
@@ -63,7 +64,7 @@ static const char *allowed[] = {
     "getgroups", "uname", "sysinfo", "arch_prctl", "set_tid_address",
     "set_robust_list", "rseq", "prlimit64", "getrlimit", "getrandom",
     "futex", "sched_yield", "poll", "select", "pselect6",
-    "prctl", "setuid", "setgid",
+    "setuid", "setgid",
 };
 
 static int install_seccomp(void) {
@@ -84,6 +85,12 @@ static int install_seccomp(void) {
                          SCMP_A0(SCMP_CMP_MASKED_EQ, CLONE_NS_MASK, 0)) < 0)
         goto fail;
 
+    /* prctl: only PR_GET_NAME and PR_SET_NAME */
+    if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(prctl), 1,
+                         SCMP_A0(SCMP_CMP_EQ, PR_GET_NAME)) < 0) goto fail;
+    if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(prctl), 1,
+                         SCMP_A0(SCMP_CMP_EQ, PR_SET_NAME)) < 0) goto fail;
+
     /* clone3: fail politely so glibc falls back to clone */
     if (seccomp_rule_add(ctx, SCMP_ACT_ERRNO(ENOSYS), SCMP_SYS(clone3), 0) < 0)
         goto fail;
@@ -97,6 +104,26 @@ fail:
 }
 
 /* ---------- child (PID 1 inside the new namespaces) ---------- */
+
+/* Become an unprivileged user with no capabilities */
+static void drop_privileges(void) {
+    const unsigned id = 65534;                 /* "nobody" */
+
+    /* 1. Empty the bounding set: exec can never regain a capability.
+          EINVAL only means we passed the last valid capability number. */
+    for (int cap = 0; cap < 64; cap++) {
+        if (prctl(PR_CAPBSET_DROP, cap, 0, 0, 0) < 0 && errno != EINVAL)
+            FAIL("PR_CAPBSET_DROP");
+    }
+
+    /* 2. Groups first, then gid, then uid */
+    if (setgroups(0, NULL) < 0)     FAIL("setgroups");
+    if (setresgid(id, id, id) < 0)  FAIL("setresgid");
+    if (setresuid(id, id, id) < 0)  FAIL("setresuid");
+
+    /* 3. Self-check: getting root back must fail */
+    if (setuid(0) == 0) { fprintf(stderr, "still root!\n"); _exit(1); }
+}
 
 struct child_args {
     const char *rootfs;
@@ -140,6 +167,8 @@ static int child_main(void *p) {
     set_limit(RLIMIT_CPU,   cpu, cpu + 1);
     set_limit(RLIMIT_FSIZE, 10 << 20, 10 << 20);
     set_limit(RLIMIT_CORE,  0, 0);
+
+    drop_privileges();
 
     /* Everything privileged is done: lock the door, then start the program */
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) FAIL("no_new_privs");
