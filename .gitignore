@@ -2,3 +2,5 @@ sandbox
 tests/segv
 tests/memhog
 rootfs/
+tests/evil
+tests/evil

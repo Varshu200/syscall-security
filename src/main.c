@@ -1,12 +1,15 @@
 #define _GNU_SOURCE
+#include <errno.h>
 #include <limits.h>
 #include <sched.h>
+#include <seccomp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -34,37 +37,91 @@ static void set_limit(int res, rlim_t soft, rlim_t hard) {
     if (setrlimit(res, &rl) < 0) FAIL("setrlimit");
 }
 
+/* ---------- seccomp ---------- */
+
+#define CLONE_NS_MASK (CLONE_NEWNS | CLONE_NEWCGROUP | CLONE_NEWUTS | \
+                       CLONE_NEWIPC | CLONE_NEWUSER | CLONE_NEWPID | \
+                       CLONE_NEWNET | 0x00000080ULL /* CLONE_NEWTIME */)
+
+static const char *allowed[] = {
+    /* process lifecycle */
+    "execve", "exit", "exit_group", "wait4", "waitid", "fork", "vfork",
+    "kill", "tgkill", "setpgid", "getpgid", "getpgrp", "setsid",
+    /* memory */
+    "brk", "mmap", "munmap", "mprotect", "mremap", "madvise",
+    /* file I/O */
+    "read", "write", "readv", "writev", "pread64", "pwrite64",
+    "open", "openat", "close", "lseek", "stat", "fstat", "lstat",
+    "newfstatat", "statx", "access", "faccessat", "faccessat2",
+    "readlink", "readlinkat", "getdents", "getdents64", "getcwd", "chdir",
+    "dup", "dup2", "dup3", "pipe", "pipe2", "fcntl", "ioctl",
+    "unlink", "unlinkat", "mkdir", "rename", "umask", "ftruncate",
+    /* signals, time, identity, runtime startup */
+    "rt_sigaction", "rt_sigprocmask", "rt_sigreturn", "sigaltstack",
+    "clock_gettime", "clock_nanosleep", "nanosleep", "gettimeofday",
+    "getpid", "getppid", "gettid", "getuid", "geteuid", "getgid", "getegid",
+    "getgroups", "uname", "sysinfo", "arch_prctl", "set_tid_address",
+    "set_robust_list", "rseq", "prlimit64", "getrlimit", "getrandom",
+    "futex", "sched_yield", "poll", "select", "pselect6",
+    "prctl", "setuid", "setgid",
+};
+
+static int install_seccomp(void) {
+    scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_KILL_PROCESS);   /* default deny */
+    if (!ctx) return -1;
+
+    for (size_t i = 0; i < sizeof allowed / sizeof allowed[0]; i++) {
+        int nr = seccomp_syscall_resolve_name(allowed[i]);
+        if (nr == __NR_SCMP_ERROR) {              /* name unknown on this arch */
+            fprintf(stderr, "[sandbox] note: skipping '%s'\n", allowed[i]);
+            continue;
+        }
+        if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 0) < 0) goto fail;
+    }
+
+    /* clone: allowed only if NO namespace flag is set (arg0 = flags) */
+    if (seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 1,
+                         SCMP_A0(SCMP_CMP_MASKED_EQ, CLONE_NS_MASK, 0)) < 0)
+        goto fail;
+
+    /* clone3: fail politely so glibc falls back to clone */
+    if (seccomp_rule_add(ctx, SCMP_ACT_ERRNO(ENOSYS), SCMP_SYS(clone3), 0) < 0)
+        goto fail;
+
+    if (seccomp_load(ctx) < 0) goto fail;
+    seccomp_release(ctx);
+    return 0;
+fail:
+    seccomp_release(ctx);
+    return -1;
+}
+
+/* ---------- child (PID 1 inside the new namespaces) ---------- */
+
 struct child_args {
     const char *rootfs;
-    char **argv;          /* program + args, NULL-terminated */
+    char **argv;
     long mem_mb;
     double limit;
 };
 
-/* Runs as PID 1 inside the new namespaces */
 static int child_main(void *p) {
     struct child_args *a = p;
 
-    /* 1. Make all mounts private so nothing propagates to the host */
     if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL) < 0)
         FAIL("make mounts private");
 
-    /* 2. pivot_root needs the new root to be a mount point: bind it to itself,
-          then remount it read-only */
     if (mount(a->rootfs, a->rootfs, NULL, MS_BIND | MS_REC, NULL) < 0)
         FAIL("bind rootfs");
     if (mount(NULL, a->rootfs, NULL,
               MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID, NULL) < 0)
         FAIL("remount rootfs read-only");
 
-    /* 3. Swap roots. pivot_root(".", ".") stacks the old root on top of the
-          new one; detaching it then makes the host filesystem unreachable. */
     if (chdir(a->rootfs) < 0) FAIL("chdir rootfs");
     if (syscall(SYS_pivot_root, ".", ".") < 0) FAIL("pivot_root");
     if (umount2(".", MNT_DETACH) < 0) FAIL("umount old root");
     if (chdir("/") < 0) FAIL("chdir /");
 
-    /* 4. Mount /proc (shows only our PID namespace) and a small writable /tmp */
     if (mount("proc", "/proc", "proc",
               MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL) < 0)
         FAIL("mount /proc");
@@ -74,11 +131,9 @@ static int child_main(void *p) {
 
     sethostname("sandbox", 7);
 
-    /* 5. Don't leak the host's environment variables into the sandbox */
     clearenv();
     setenv("PATH", "/bin", 1);
 
-    /* 6. Resource limits (Phase 2) */
     rlim_t mem = (rlim_t)a->mem_mb * 1024 * 1024;
     rlim_t cpu = (rlim_t)a->limit + 1;
     set_limit(RLIMIT_AS,    mem, mem);
@@ -86,10 +141,16 @@ static int child_main(void *p) {
     set_limit(RLIMIT_FSIZE, 10 << 20, 10 << 20);
     set_limit(RLIMIT_CORE,  0, 0);
 
+    /* Everything privileged is done: lock the door, then start the program */
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) FAIL("no_new_privs");
+    if (install_seccomp() < 0) FAIL("seccomp");
+
     execvp(a->argv[0], a->argv);
     perror("execvp");
     _exit(127);
 }
+
+/* ---------- parent ---------- */
 
 static void report(int status, struct rusage *ru, long mem_mb) {
     long peak_mb = ru->ru_maxrss / 1024;
@@ -98,7 +159,9 @@ static void report(int status, struct rusage *ru, long mem_mb) {
         printf("[sandbox] exited with code %d\n", WEXITSTATUS(status));
     } else if (WIFSIGNALED(status)) {
         int sig = WTERMSIG(status);
-        if (sig == SIGXCPU)
+        if (sig == SIGSYS)
+            printf("[sandbox] KILLED by seccomp: forbidden syscall\n");
+        else if (sig == SIGXCPU)
             printf("[sandbox] CPU time limit exceeded\n");
         else if (sig == SIGXFSZ)
             printf("[sandbox] file size limit exceeded\n");
@@ -157,7 +220,7 @@ int main(int argc, char **argv) {
         if (r < 0) die("wait4");
 
         if (now() - start > limit) {
-            kill(pid, SIGKILL);          /* PID 1 dies, so the whole namespace dies */
+            kill(pid, SIGKILL);
             wait4(pid, &status, 0, &ru);
             printf("[sandbox] TLE (limit %.1fs)\n", limit);
             return 0;
