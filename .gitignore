@@ -5,3 +5,4 @@ rootfs/
 tests/evil
 tests/evil
 tests/forkbomb
+tests/attack

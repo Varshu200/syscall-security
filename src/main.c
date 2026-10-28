@@ -326,9 +326,23 @@ int main(int argc, char **argv) {
     pid_t pid = clone(child_main, stack + stack_size, flags, &args);
     if (pid < 0) die("clone");
 
-    double start = now();
     int status;
     struct rusage ru;
+
+    /* Put the child in its cgroup BEFORE it can run untrusted code */
+    close(sync_fd[0]);
+    if (cg_setup(pid, mem_mb, MAX_PIDS) < 0) {
+        fprintf(stderr, "[sandbox] cgroup setup failed\n");
+        close(sync_fd[1]);              /* child sees EOF and exits */
+        kill(pid, SIGKILL);
+        wait4(pid, &status, 0, &ru);
+        cg_cleanup();
+        return 1;
+    }
+    if (write(sync_fd[1], "x", 1) != 1) die("sync write");
+    close(sync_fd[1]);
+
+    double start = now();
 
     for (;;) {
         pid_t r = wait4(pid, &status, WNOHANG, &ru);
