@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>File Safety Report | Syscall Sandbox</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2e;--line:#273653;--text:#edf3ff;--muted:#a7b5ce;--accent:#76e4c2;--blue:#8ba9ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top right,#17284a 0,transparent 45%),var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{width:min(1000px,calc(100% - 32px));margin:38px auto}header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:24px}
+h1{font-size:clamp(25px,4vw,36px);line-height:1.15;margin:0 0 5px}h2{font-size:19px;margin:0 0 14px}.muted{color:var(--muted)}
+a{color:var(--accent)}.panel{background:rgba(18,26,46,.96);border:1px solid var(--line);border-radius:18px;padding:24px;margin-bottom:18px}
+input[type=file]{display:block;width:100%;padding:16px;border:1px dashed #496083;border-radius:12px;background:#0b1325;color:var(--text);margin:14px 0}
+button{border:0;border-radius:10px;padding:12px 16px;background:var(--accent);color:#06241f;font-weight:800;cursor:pointer}button.secondary{background:#263552;color:var(--text);border:1px solid #405273}
+.pill{display:inline-block;border-radius:999px;padding:5px 11px;font-size:12px;font-weight:800;letter-spacing:.3px}
+.low{background:#153b31;color:#8ff0c9}.medium{background:#443719;color:#ffda8b}.high{background:#4a202b;color:#ffabb9}
+.warning{border:1px solid #66522c;background:#2a2317;color:#f5d9a0;border-radius:12px;padding:14px 16px;font-size:13px}
+.error{border:1px solid #75404a;background:#341d28;color:#ffc1ca;border-radius:12px;padding:13px;margin-top:14px}
+.meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}.meta div{background:#0e1729;border:1px solid var(--line);border-radius:11px;padding:12px;overflow-wrap:anywhere}.meta small{display:block;color:var(--muted);margin-bottom:4px}
+.finding{border:1px solid var(--line);border-radius:12px;padding:15px;margin:12px 0;background:#0e1729}.finding h3{font-size:16px;margin:0 0 6px}.finding p{margin:4px 0 10px;color:var(--muted)}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080d18;border:1px solid #25334d;border-radius:9px;padding:11px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;margin:8px 0}
+ul{padding-left:21px}.limits li{margin:6px 0;color:var(--muted)}footer{text-align:center;color:var(--muted);font-size:12px;padding:14px}
+@media(max-width:650px){main{margin:22px auto}.panel{padding:18px}.meta{grid-template-columns:1fr}.header-links{font-size:13px}}
+</style></head>
+<body><main>
+<header><div><h1>File Safety Assessment</h1><div class="muted">Static source/text scan · files are not executed</div></div><a href="/">← Sandbox dashboard</a></header>
+<section class="panel">
+<h2>Upload a file to analyse</h2>
+<p class="muted">Supported: C/C++, Python, shell, JavaScript, PHP, Ruby, Perl, and text files. Maximum 512 KB. Binary executables are not accepted.</p>
+<form method="post" enctype="multipart/form-data">
+<input type="file" name="file" accept=".c,.h,.cpp,.hpp,.py,.sh,.js,.php,.rb,.pl,.txt" required>
+<button type="submit">Analyse file and generate report</button>
+</form>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+</section>
+{% if report %}
+<section class="panel" id="report">
+<h2>Analysis report</h2>
+<span class="pill {{ report.level }}">{{ report.label }}</span>
+<p>{{ report.summary }}</p>
+<div class="meta">
+<div><small>File name</small><strong>{{ report.filename }}</strong></div>
+<div><small>File size / lines</small><strong>{{ report.size }} bytes / {{ report.line_count }} lines</strong></div>
+<div><small>Indicators found</small><strong>{{ report.hits|length }} categories · score {{ report.score }}</strong></div>
+<div><small>SHA-256</small><strong>{{ report.sha256 }}</strong></div>
+<div><small>Scanned at</small><strong>{{ report.scanned_at }}</strong></div>
+<div><small>Analysis method</small><strong>Heuristic text scan</strong></div>
+</div>
+<h2>Findings</h2>
+{% if report.hits %}
+{% for hit in report.hits %}
+<div class="finding"><h3>{{ hit.title }} <span class="muted">· weight {{ hit.weight }}</span></h3><p>{{ hit.explanation }}</p>
+{% for item in hit.lines %}<p><strong>Line {{ item.line }}</strong></p><pre>{{ item.text }}</pre>{% endfor %}
+</div>
+{% endfor %}
+{% else %}
+<div class="finding"><h3>No known indicators detected</h3><p>This only means the scanner's limited patterns were not found. It is not evidence that the file is safe.</p></div>
+{% endif %}
+<h2>Limitations and recommendations</h2>
+<ul class="limits">{% for item in report.limitations %}<li>{{ item }}</li>{% endfor %}</ul>
+<button type="button" class="secondary" onclick="downloadReport()">Download report (.txt)</button>
+<pre id="reportText" hidden>SYSCALL SANDBOX — FILE SAFETY ASSESSMENT
+========================================
+File: {{ report.filename }}
+Size: {{ report.size }} bytes
+Lines: {{ report.line_count }}
+SHA-256: {{ report.sha256 }}
+Scanned at: {{ report.scanned_at }}
+Assessment: {{ report.label }}
+Heuristic score: {{ report.score }}
+Summary: {{ report.summary }}
+
+FINDINGS
+{% if report.hits %}{% for hit in report.hits %}{{ loop.index }}. {{ hit.title }} (weight {{ hit.weight }})
+{{ hit.explanation }}
+{% for item in hit.lines %}  Line {{ item.line }}: {{ item.text }}
+{% endfor %}
+{% endfor %}{% else %}No known indicators were detected by this limited rule set.
+{% endif %}
+LIMITATIONS
+{% for item in report.limitations %}- {{ item }}
+{% endfor %}
+</pre>
+</section>
+{% endif %}
+<div class="warning"><strong>Important:</strong> this report is a preliminary review aid, not a verdict that a file is safe or malicious. Scanning does not run the file. Never expose this privileged local application to the internet, and do not execute unknown files on your main machine.</div>
+<footer>Syscall Sandbox · Local-only interface · 127.0.0.1</footer>
+</main>
+<script>
+function downloadReport(){
+ const text=document.getElementById('reportText').textContent;
+ const blob=new Blob([text],{type:'text/plain;charset=utf-8'});
+ const url=URL.createObjectURL(blob);const a=document.createElement('a');
+ a.href=url;a.download='sandbox-safety-report.txt';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+</script>
+</body></html>

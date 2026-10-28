@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Syscall Sandbox | Local Control Panel</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2e;--line:#273653;--text:#edf3ff;--muted:#a7b5ce;--accent:#76e4c2;--blue:#8ba9ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top right,#17284a 0,transparent 45%),var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{width:min(1080px,calc(100% - 32px));margin:42px auto}header{display:flex;gap:16px;align-items:center;margin-bottom:28px}
+.logo{width:54px;height:54px;border-radius:16px;display:grid;place-items:center;background:#183c43;color:var(--accent);font-size:26px;font-weight:800;border:1px solid #2b6a69}
+h1{font-size:clamp(25px,4vw,38px);line-height:1.15;margin:0 0 5px;letter-spacing:-.7px}.sub,.muted{color:var(--muted)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}.panel{background:rgba(18,26,46,.94);border:1px solid var(--line);border-radius:18px;padding:24px;box-shadow:0 18px 55px #0002}
+h2{font-size:18px;margin:0 0 18px}label{display:block;font-size:14px;font-weight:650;margin:16px 0 7px}
+select,input{width:100%;padding:12px 13px;border-radius:10px;border:1px solid #344766;background:#0b1325;color:var(--text);font:inherit}
+input:focus,select:focus{outline:2px solid var(--blue);outline-offset:1px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+button{width:100%;margin-top:22px;border:0;border-radius:11px;padding:13px 16px;background:var(--accent);color:#06241f;font-weight:800;font-size:15px;cursor:pointer}button:hover{filter:brightness(1.06)}
+.chip{display:inline-block;border:1px solid #315f5b;background:#142f32;color:var(--accent);border-radius:99px;padding:4px 10px;font-size:12px;font-weight:700}
+.result{margin-top:20px}.status{font-weight:750;margin:0 0 12px}pre{background:#080d18;border:1px solid #25334d;border-radius:12px;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere;min-height:130px;max-height:380px;overflow:auto;color:#d8e6ff;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+.note{margin-top:18px;padding:14px 16px;border:1px solid #66522c;background:#2a2317;border-radius:12px;color:#f5d9a0;font-size:13px}.features{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}
+.feature{padding:13px;border:1px solid var(--line);border-radius:12px;background:#0e1729}.feature strong{display:block;font-size:14px}.feature span{color:var(--muted);font-size:12px}
+footer{color:var(--muted);font-size:12px;text-align:center;margin:25px 0}@media(max-width:760px){.layout{grid-template-columns:1fr}main{margin:24px auto}.panel{padding:19px}}
+</style></head>
+<body><main>
+<header><div class="logo" aria-hidden="true">S</div><div><h1>Syscall Sandbox</h1><div class="sub">Local execution control panel <span class="chip">LOOPBACK ONLY</span></div></div></header>
+<p style="margin:0 0 20px"><a href="/analyze" style="display:inline-block;padding:10px 14px;border:1px solid #315f5b;border-radius:10px;color:#76e4c2;text-decoration:none">↗ Upload a file for safety analysis</a></p>
+<div class="layout">
+<section class="panel"><h2>Run a sandboxed demo</h2><p class="muted">Choose a built-in demo. This interface does not accept shell commands or arbitrary executable paths.</p>
+<form method="post">
+<label for="program">Demo program</label><select id="program" name="program">{% for key, item in programs.items() %}<option value="{{ key }}" {% if selected == key %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select>
+<label for="message">Message (used by Echo only)</label><input id="message" name="message" maxlength="500" value="{{ message }}" autocomplete="off">
+<div class="two"><div><label for="seconds">Time limit</label><select id="seconds" name="seconds">{% for n in range(1, 11) %}<option value="{{ n }}" {% if seconds == n %}selected{% endif %}>{{ n }} second{% if n != 1 %}s{% endif %}</option>{% endfor %}</select></div>
+<div><label for="memory_mb">Memory limit</label><select id="memory_mb" name="memory_mb">{% for n in [32,64,128,256] %}<option value="{{ n }}" {% if memory_mb == n %}selected{% endif %}>{{ n }} MB</option>{% endfor %}</select></div></div>
+<button type="submit">▶ Run in sandbox</button></form>
+{% if result %}<div class="result" aria-live="polite"><p class="status">{{ result.status }}</p><pre>{{ result.output }}</pre></div>{% endif %}
+</section>
+<aside class="panel"><h2>What protects the host?</h2><div class="features">
+<div class="feature"><strong>Namespaces</strong><span>Separate process and system views</span></div><div class="feature"><strong>cgroups v2</strong><span>Memory and process limits</span></div>
+<div class="feature"><strong>seccomp-BPF</strong><span>Restricts system calls</span></div><div class="feature"><strong>Privilege drop</strong><span>Child runs as unprivileged user</span></div>
+<div class="feature"><strong>Read-only rootfs</strong><span>Limits filesystem changes</span></div><div class="feature"><strong>Resource limits</strong><span>Time and file-size controls</span></div></div>
+<div class="note"><strong>Important:</strong> this is a local educational demo, not a guarantee of safety for hostile code. The sandbox shares the host Linux kernel. Do not expose this app to the internet or use it to run unknown programs. Use a disposable VM for security testing.</div>
+</aside></div><footer>Syscall Sandbox · Flask local interface · Bound to 127.0.0.1</footer>
+</main></body></html>
