@@ -7,3 +7,7 @@ sandbox: src/main.c
 
 clean:
 	rm -f sandbox
+
+.PHONY: test
+test: sandbox
+	sudo tests/run_all.sh
