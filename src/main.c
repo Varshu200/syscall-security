@@ -65,6 +65,8 @@ static const char *allowed[] = {
     "set_robust_list", "rseq", "prlimit64", "getrlimit", "getrandom",
     "futex", "sched_yield", "poll", "select", "pselect6",
     "setuid", "setgid",
+    "sendfile",
+    "utimensat",
 };
 
 static int install_seccomp(void) {
