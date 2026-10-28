@@ -3,13 +3,13 @@
 from pathlib import Path
 import os
 import subprocess
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request\nfrom safety_analyzer import analyze_text, MAX_SCAN_BYTES
 
 BASE_DIR = Path(__file__).resolve().parent
 SANDBOX = BASE_DIR / "sandbox"
 ROOTFS = BASE_DIR / "rootfs"
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 4096
+app.config["MAX_CONTENT_LENGTH"] = MAX_SCAN_BYTES + 64 * 1024
 
 # Only fixed programs are available; no shell commands or arbitrary paths.
 PROGRAMS = {
@@ -56,6 +56,24 @@ def local_only():
     if request.remote_addr not in ("127.0.0.1", "::1"):
         return "Local access only", 403
 
+@app.route("/analyze", methods=["GET", "POST"])
+def analyze_upload():
+    report = None
+    error = None
+    if request.method == "POST":
+        uploaded = request.files.get("file")
+        if not uploaded or not uploaded.filename:
+            error = "Choose a source-code or text file to analyse."
+        else:
+            # Treat filename as display-only metadata; never use it as a filesystem path.
+            filename = uploaded.filename.replace("\\", "/").rsplit("/", 1)[-1][:120]
+            try:
+                report = analyze_text(filename, uploaded.read(MAX_SCAN_BYTES + 1))
+            except ValueError as exc:
+                error = str(exc)
+    return render_template("analyze.html", report=report, error=error)
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     result = None
@@ -92,6 +110,12 @@ def index():
                     result = {"status": status, "output": output or "(No output)", "ok": code == 0}
     return render_template("index.html", programs=PROGRAMS, selected=selected,
                            message=message, seconds=seconds, memory_mb=memory_mb, result=result)
+
+@app.errorhandler(413)
+def too_large(_error):
+    return render_template("analyze.html", report=None,
+                           error="Upload exceeds the 512 KB analysis limit."), 413
+
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
