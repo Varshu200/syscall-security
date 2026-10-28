@@ -40,3 +40,16 @@ The current sandbox needs root privileges to create cgroups and namespaces, so t
 ## Security notes
 
 This is a local educational interface, not a production service. The C sandbox shares the host kernel; a web form does not make it a complete security boundary. Keep the program list fixed, review changes to the C sandbox and syscall allowlist, and use a disposable VM for experiments with potentially hostile code. Do not expose this privileged development server to other machines.
+
+
+## Upload a file and generate a preliminary report
+
+After starting the dashboard, open http://127.0.0.1:5000 and choose **Upload a file for safety analysis**, or open http://127.0.0.1:5000/analyze directly.
+
+- Upload supported UTF-8 source/text files: C/C++, Python, shell, JavaScript, PHP, Ruby, Perl, or TXT.
+- Maximum upload size is 512 KB.
+- The scanner checks for suspicious code patterns and reports the matched categories and line snippets. You can download the report as a text file.
+- Files are analysed in memory and are not saved or executed by the upload feature. Binary executables are not accepted.
+- The score is a simple heuristic, not a calibrated probability. A high score means review the listed findings; a low score does not mean the file is safe. False positives and missed threats are possible.
+
+For a real malware assessment, use multiple static-analysis tools and a disposable VM. Do not treat this feature as antivirus or as proof that a file is safe to execute.
