@@ -1,6 +1,6 @@
 # Local web interface
 
-This adds a Flask dashboard for the existing C sandbox. It exposes only fixed demonstration programs: echo, id, hostname, ls, and a fixed timeout demo. It does not accept arbitrary shell commands, executable paths, source uploads, or arbitrary arguments.
+This adds a Flask dashboard for the existing C sandbox plus a separate non-executing source/text scanner. The run-demo page exposes only fixed demonstration programs: echo, id, hostname, ls, and a fixed timeout demo. The upload page scans supported UTF-8 source/text files and does not execute them.
 
 ## Requirements
 
