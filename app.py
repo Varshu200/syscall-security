@@ -3,7 +3,8 @@
 from pathlib import Path
 import os
 import subprocess
-from flask import Flask, render_template, request\nfrom safety_analyzer import analyze_text, MAX_SCAN_BYTES
+from flask import Flask, render_template, request
+from safety_analyzer import analyze_text, MAX_SCAN_BYTES
 
 BASE_DIR = Path(__file__).resolve().parent
 SANDBOX = BASE_DIR / "sandbox"
